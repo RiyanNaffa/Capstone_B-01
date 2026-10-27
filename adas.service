@@ -1,0 +1,59 @@
+[Unit]
+Description=ADAS Bus Kampus UGM — Active Collision Alert System
+After=network.target
+# Saat sistem shutdown/reboot, systemd akan stop service ini sebelum power turun
+# Ini memastikan GPIO, SPI, serial dibebaskan secara bersih
+Before=shutdown.target reboot.target halt.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+# ── Path justifikasi ────────────────────────────────────────────────────────
+# /opt/adas/ dipilih karena:
+#   - Standar FHS untuk "add-on application software packages": lebih rapi
+#     daripada /home/orangepi/ yang bergantung pada session user.
+#   - Hak akses bisa diset sekali (chmod/chown) tanpa bergantung home dir.
+#   - Tidak terhapus jika user dihapus atau home di-reset.
+#
+# Venv di /opt/adas/.venv/ bukan global pip karena:
+#   - Ubuntu Noble (Ubuntu 24.04 yang dipakai OrangePi OS) memberlakukan
+#     PEP 668: pip global terblokir kecuali pakai --break-system-packages,
+#     yang berbahaya karena bisa merusak paket sistem.
+#   - Venv memberikan isolasi dependency yang bersih: upgrade numpy/tflite
+#     tidak mempengaruhi paket OS.
+#
+# User=root diperlukan karena:
+#   - /dev/gpiochip0 → butuh akses ke GPIO driver
+#   - /dev/spidev1.0 → SPI1 untuk LCD ILI9341
+#   - /dev/ttyS0    → UART0 untuk GPS
+#   Ketiga device ini default hanya accessible oleh root di Ubuntu Noble
+#   kecuali user ditambahkan ke group yang sesuai (lihat komentar alternatif).
+#
+# Alternatif tanpa root (lebih aman, direkomendasikan untuk produksi):
+#   sudo usermod -aG gpio,spi,dialout orangepi
+#   # Lalu ganti User=root → User=orangepi di bawah.
+#   # Pastikan udev rules sudah mengizinkan group tersebut:
+#   #   /etc/udev/rules.d/99-adas.rules:
+#   #   SUBSYSTEM=="gpio", GROUP="gpio", MODE="0660"
+#   #   SUBSYSTEM=="spidev", GROUP="spi", MODE="0660"
+#   #   SUBSYSTEM=="tty", GROUP="dialout", MODE="0660"
+# ───────────────────────────────────────────────────────────────────────────
+
+ExecStart=/opt/adas/.venv/bin/python3 /opt/adas/main.py
+WorkingDirectory=/opt/adas
+
+# Restart otomatis jika crash (misalnya kamera tidak terdeteksi saat boot)
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10    # beri waktu 10 detik untuk recorder flush sebelum SIGKILL
+
+# Log ke systemd journal — bisa dipantau dengan:
+#   journalctl -u adas.service -f
+StandardOutput=journal
+StandardError=journal
+
+User=root
+KillMode=control-group   # pastikan semua child process ikut mati saat service stop
+
+[Install]
+WantedBy=multi-user.target

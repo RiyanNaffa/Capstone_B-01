@@ -1,0 +1,30 @@
+[Unit]
+Description=ADAS Bus Kampus UGM — Mode Video Offline
+# Tidak perlu After=network.target karena tidak butuh GPS/LCD/buzzer
+# Tidak di-enable untuk autostart — dijalankan manual saat dibutuhkan
+
+[Service]
+# Path video dipass lewat Environment atau edit ExecStart langsung
+# Contoh: edit VIDEO_PATH lalu jalankan: systemctl start adas-video.service
+Environment=VIDEO_PATH=/opt/adas/recordings/latest.avi
+Environment=PLAYBACK_SPEED=1.0
+
+ExecStart=/opt/adas/.venv/bin/python3 /opt/adas/main_video.py \
+    --video ${VIDEO_PATH} \
+    --speed ${PLAYBACK_SPEED}
+
+WorkingDirectory=/opt/adas
+
+# Jangan restart otomatis — ini one-shot, berhenti saat video selesai
+Restart=no
+
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+
+User=root
+
+[Install]
+# Tidak di-enable secara default (WantedBy dikosongkan)
+# Enable manual jika perlu autorun: systemctl enable adas-video.service
+WantedBy=
