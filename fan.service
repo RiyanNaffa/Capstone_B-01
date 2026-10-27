@@ -1,5 +1,5 @@
 [Unit]
-Description=Fan PWM2 — selalu on 100% saat boot
+Description=Fan PWM1 - always on 100% on boot
 # Jalankan sebelum adas.service agar Orange Pi tidak overheat saat inferensi
 Before=adas.service
 After=sysinit.target
@@ -8,15 +8,15 @@ After=sysinit.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/bin/sh -c '\
-    echo 2 > /sys/class/pwm/pwmchip0/export || true; \
+    echo 1 > /sys/class/pwm/pwmchip0/export || true; \
     sleep 0.1; \
-    echo 0      > /sys/class/pwm/pwmchip0/pwm2/enable; \
-    echo 40000000 > /sys/class/pwm/pwmchip0/pwm2/period; \
-    echo 40000000 > /sys/class/pwm/pwmchip0/pwm2/duty_cycle; \
-    echo 1      > /sys/class/pwm/pwmchip0/pwm2/enable'
+    echo 0      > /sys/class/pwm/pwmchip0/pwm1/enable; \
+    echo 40000000 > /sys/class/pwm/pwmchip0/pwm1/period; \
+    echo 40000000 > /sys/class/pwm/pwmchip0/pwm1/duty_cycle; \
+    echo 1      > /sys/class/pwm/pwmchip0/pwm1/enable'
 ExecStop=/bin/sh -c '\
-    echo 0 > /sys/class/pwm/pwmchip0/pwm2/duty_cycle || true; \
-    echo 0 > /sys/class/pwm/pwmchip0/pwm2/enable      || true; \
+    echo 0 > /sys/class/pwm/pwmchip0/pwm1/duty_cycle || true; \
+    echo 0 > /sys/class/pwm/pwmchip0/pwm1/enable      || true; \
     echo 2 > /sys/class/pwm/pwmchip0/unexport          || true'
 
 [Install]
