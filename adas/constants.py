@@ -1,10 +1,23 @@
 #!/usr/bin/env python3
 """
-constants.py — Semua konstanta sistem ADAS Bus Kampus UGM
-Orange Pi Zero 2W (Allwinner H618, 4× Cortex-A53 @ 1.5 GHz, 2 GB RAM)
+constants.py — Semua konstanta sistem AMCAS Bus Kampus UGM
+Orange Pi Zero 2W (Allwinner H618, 4x Cortex-A53 @ 1.5 GHz, 2 GB RAM)
 
-Setiap konstanta disertai justifikasi agar mudah di-tune tanpa harus
-menelusuri seluruh kodebase.
+Daftar interface:
+- GPS: UART0 (uart0)
+    - RX    -> Pin 8:   UART0_TX    | PH0
+    - TX    -> Pin 10:  UART0_RX    | PH1
+- LCD TFT: SPI1 (spidev1.0)
+    - MOSI  -> Pin 19:  SPI1_MOSI   | PH7
+    - MISO  -> Pin 21:  SPI1_MISO   | PH8
+    - CLK   -> Pin 23:  SPI1_CLK    | PH6
+    - CS    -> Pin 24:  SPI1_CS0    | PH5
+    - RST   -> Pin 26:  GPIO262     | PI6
+    - DC    -> Pin 22:  GPIO228     | PH4
+    - LED   -> Pin 18               | 3.3V
+- Buzzer: GPIO
+    - Base  -> Pin 12: GPIO257      | PI1 
+- Camera: USB HD Camera (v4l2)
 """
 
 import cv2  # hanya untuk LK_PARAMS
@@ -31,9 +44,9 @@ GPIO_CHIP    = "/dev/gpiochip0"
 
 # GPIO line number — diambil dari lcdcapstone.py yang sudah terbukti jalan
 BUZZER_ENABLED = False  # Set True untuk aktifkan buzzer, False untuk tes tanpa bunyi
-BUZZER_LINE  = 267      # PI11 (PWM1, pin fisik 32) → bank I (8×32) + 11 = 267
-LCD_DC_LINE  = 270   # PIN_DC  di lcdcapstone.py = 270
-LCD_RST_LINE = 228   # PIN_RST di lcdcapstone.py = 228
+BUZZER_LINE  = 257      # PI1 (PWM0, pin fisik 12) → bank I (8×32) + 1 = 257
+LCD_DC_LINE  = 228   # PIN_DC  di lcdcapstone.py = 228
+LCD_RST_LINE = 262   # PIN_RST di lcdcapstone.py = 262
 
 # Kamera: gunakan keyword yang ada di nama device v4l2
 # ls /dev/v4l/by-id/ menampilkan dua entry untuk kamera HD USB:

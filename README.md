@@ -219,3 +219,19 @@ df -h >> /tmp/adas_log.txt
 # Unduh ke laptop
 scp orangepi@<IP>:/tmp/adas_log.txt ./adas_log_$(date +%Y%m%d).txt
 ```
+
+## 9. Daftar Interface Hardware
+
+| Perangkat | Interface | Sinyal | Pin Fisik | Nama/Pemetaan |
+|-----------|-----------|--------|------------|---------------|
+| GPS | UART0 (`uart0`) | RX | 8 | UART0_TX / PH0 |
+| GPS | UART0 (`uart0`) | TX | 10 | UART0_RX / PH1 |
+| LCD TFT | SPI1 (`spidev1.0`) | MOSI | 19 | SPI1_MOSI / PH7 |
+| LCD TFT | SPI1 (`spidev1.0`) | MISO | 21 | SPI1_MISO / PH8 |
+| LCD TFT | SPI1 (`spidev1.0`) | CLK | 23 | SPI1_CLK / PH6 |
+| LCD TFT | SPI1 (`spidev1.0`) | CS | 24 | SPI1_CS0 / PH5 |
+| LCD TFT | SPI1 (`spidev1.0`) | RST | 26 | GPIO262 / PI6 |
+| LCD TFT | SPI1 (`spidev1.0`) | DC | 22 | GPIO228 / PH4 |
+| LCD TFT | SPI1 (`spidev1.0`) | LED | 18 | 3.3V |
+| Buzzer | GPIO | Base | 12 | GPIO257 / PI1 |
+| Kamera HD USB | USB (v4l2) | — | — | — |
