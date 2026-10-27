@@ -1,4 +1,4 @@
-# Panduan Monitoring ADAS via SSH
+# Panduan Monitoring AMCAS via SSH
 ## Bus Kampus UGM — Orange Pi Zero 2W
 
 ---
@@ -8,7 +8,6 @@
 ```bash
 ssh orangepi@<IP_ORANGE_PI>
 # contoh: ssh orangepi@192.168.1.42
-# default password: orangepi
 ```
 
 Cek IP perangkat dari router, atau jalankan di perangkat langsung:
@@ -62,7 +61,7 @@ tail -f /var/log/adas/adas_error.log
 **Contoh output normal:**
 ```
 10:23:01 [INFO] main: ==================================================
-10:23:01 [INFO] main: ADAS Bus Kampus UGM — Memulai...
+10:23:01 [INFO] main: AMCAS Bus Kampus UGM — Memulai...
 10:23:02 [INFO] pipeline: Model dan tracker siap.
 10:23:02 [INFO] pipeline: Kamera dibuka: 256x256
 10:23:02 [INFO] gps_reader: Thread dimulai (/dev/ttyS0 @ 9600 baud)
@@ -114,7 +113,7 @@ done
 ```bash
 df -h
 
-# Ukuran log ADAS
+# Ukuran log AMCAS
 du -sh /var/log/adas/
 ```
 
