@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-lcd.py — Driver LCD ILI9341 240×320 + UI AMCAS untuk ADAS Bus Kampus UGM.
+lcd.py — Driver LCD ILI9341 320×240 (LANDSCAPE) + UI AMCAS untuk ADAS Bus Kampus UGM.
 
 Diambil dari lcdcapstone.py (root workspace) dan direfactor menjadi class
 ACASDisplay yang dapat dipanggil dari pipeline.py.
@@ -16,8 +16,18 @@ Perubahan dari lcdcapstone.py:
   5. ACASDisplay diinstansiasi di start() dan dilepas di stop() agar bisa
      di-restart tanpa perlu restart proses.
 
+Revisi landscape:
+  6. Orientasi layar diubah ke landscape 320×240 (MADCTL dari LCD_ROTATION
+     di constants.py). Semua koordinat UI disusun ulang untuk 320×240.
+  7. Indikator GPS dipindah ke tengah header sehingga tidak lagi menimpa
+     tulisan "AMCAS" (pada versi portrait area GPS x 4–94 menimpa judul).
+  8. Tabel font diganti dengan glcdfont Adafruit lengkap (ASCII 32–126),
+     sehingga bentuk huruf sama dengan font TFT standar dan simbol '%' tersedia.
+  9. Splash screen AMCAS (±2,3 s) ditampilkan otomatis di init_hardware()
+     sebelum layar boot. Bisa dimatikan lewat LCD_SPLASH_ENABLED di constants.py.
+
 Hardware:
-    TFT ILI9341 240×320 portrait
+    TFT ILI9341 320×240 landscape
     SPI1: MOSI=PH7, MISO=PH8, CLK=PH6, CS0=PH5
     RST → PI6 (line 262), DC → PH4 (line 228)
     LED → 3.3V (selalu on)
@@ -51,6 +61,8 @@ from .constants import (
     LCD_DC_LINE,
     LCD_RST_LINE,
     LCD_W, LCD_H,
+    LCD_ROTATION,
+    LCD_SPLASH_ENABLED,
     LCD_UPDATE_INTERVAL,
     TTC_BAHAYA,
     TTC_SIAGA,
@@ -80,10 +92,16 @@ STYLE = (
     ("BAHAYA", RED,   RED,   RED,   RED,   RED,      TEXT,  False),
 )
 
-# ── Regions yang di-refresh parsial ──────────────────────────────────────────
-R_TTC  = (8,   40, 224,  72)   # TTC frame + value + unit
-R_DIST = (100, 126, 108, 24)   # dist value saja
-R_GPS  = (4,    4,  90,  24)   # indikator GPS di kiri header
+# ── Layout landscape 320×240 ─────────────────────────────────────────────────
+#   Header      y   0– 32   AMCAS | indikator GPS | ● ACTIVE
+#   Panel TTC   x   8–155   y  40–111   (kiri, informasi utama)
+#   Panel JARAK x 164–311   y  40–111   (kanan)
+#   Deteksi     y 117–190   bus + bracket di kiri, "OBJEK TERDETEKSI" di kanan
+#   Status bar  x   8–311   y 196–231
+# ── Regions yang di-refresh parsial (x, y, w, h) ─────────────────────────────
+R_TTC  = (8,   40, 148, 72)    # panel TTC lengkap
+R_DIST = (164, 40, 148, 72)    # panel JARAK lengkap
+R_GPS  = (76,   3, 124, 27)    # indikator GPS di tengah header
 
 # ── Boot screen ───────────────────────────────────────────────────────────────
 # Status item: (label, status) di mana status: 'wait'|'ok'|'fail'|'warn'
@@ -100,40 +118,32 @@ BOOT_ICON = {
     'warn': '.',
 }
 
-# ── Font 5×7 ─────────────────────────────────────────────────────────────────
+# ── Font 5×7 — glcdfont Adafruit_GFX (ASCII 32–126, font TFT standar) ────────
 FONT = {
-    ' ': (0,0,0,0,0), '.': (0,0x60,0x60,0,0), '-': (8,8,8,8,8),
-    '0':(0x3E,0x51,0x49,0x45,0x3E),'1':(0x00,0x42,0x7F,0x40,0x00),
-    '2':(0x42,0x61,0x51,0x49,0x46),'3':(0x21,0x41,0x45,0x4B,0x31),
-    '4':(0x18,0x14,0x12,0x7F,0x10),'5':(0x27,0x45,0x45,0x45,0x39),
-    '6':(0x3C,0x4A,0x49,0x49,0x30),'7':(0x01,0x71,0x09,0x05,0x03),
-    '8':(0x36,0x49,0x49,0x49,0x36),'9':(0x06,0x49,0x49,0x29,0x1E),
-    'A':(0x7C,0x12,0x11,0x12,0x7C),'B':(0x7F,0x49,0x49,0x49,0x36),
-    'C':(0x3E,0x41,0x41,0x41,0x22),'D':(0x7F,0x41,0x41,0x22,0x1C),
-    'E':(0x7F,0x49,0x49,0x49,0x41),'G':(0x3E,0x41,0x49,0x49,0x7A),
-    'H':(0x7F,0x08,0x08,0x08,0x7F),'I':(0x00,0x41,0x7F,0x41,0x00),
-    'J':(0x20,0x40,0x41,0x3F,0x01),'K':(0x7F,0x08,0x14,0x22,0x41),
-    'M':(0x7F,0x02,0x0C,0x02,0x7F),'N':(0x7F,0x04,0x08,0x10,0x7F),
-    'O':(0x3E,0x41,0x41,0x41,0x3E),'R':(0x7F,0x09,0x19,0x29,0x46),
-    'F':(0x7F,0x09,0x09,0x09,0x01),'L':(0x7F,0x40,0x40,0x40,0x40),
-    'P':(0x7F,0x09,0x09,0x09,0x06),'U':(0x3F,0x40,0x40,0x40,0x3F),
-    'S':(0x46,0x49,0x49,0x49,0x31),'T':(0x01,0x01,0x7F,0x01,0x01),
-    'V':(0x1F,0x20,0x40,0x20,0x1F),'Y':(0x07,0x08,0x70,0x08,0x07),
-    'W':(0x3F,0x40,0x38,0x40,0x3F),'Q':(0x1E,0x21,0x25,0x22,0x1D),
-    'X':(0x41,0x22,0x1C,0x22,0x41),'Z':(0x61,0x51,0x49,0x45,0x43),
-    'a':(0x20,0x54,0x54,0x54,0x78),'e':(0x38,0x54,0x54,0x54,0x18),
-    'r':(0x7C,0x08,0x04,0x04,0x08),'o':(0x38,0x44,0x44,0x44,0x38),
-    'i':(0x00,0x44,0x7D,0x40,0x00),'u':(0x3C,0x40,0x40,0x20,0x7C),
-    'z':(0x44,0x64,0x54,0x4C,0x44),'p':(0xFE,0x11,0x11,0x11,0x0E),
-    'n':(0x7C,0x08,0x04,0x04,0x78),'t':(0x04,0x3F,0x44,0x40,0x20),
-    'c':(0x38,0x44,0x44,0x44,0x28),'g':(0x04,0x2A,0x2A,0x2A,0x1E),
-    'b':(0x7F,0x44,0x44,0x44,0x38),'h':(0x7F,0x08,0x04,0x04,0x78),
-    'l':(0x00,0x41,0x7F,0x40,0x00),'d':(0x38,0x44,0x44,0x48,0x7F),
-    'f':(0x08,0x7E,0x09,0x01,0x02),'k':(0x7F,0x10,0x28,0x44,0x00),
-    'v':(0x1C,0x20,0x40,0x20,0x1C),'w':(0x3C,0x40,0x30,0x40,0x3C),
-    'x':(0x44,0x28,0x10,0x28,0x44),'y':(0x04,0x08,0x30,0x08,0x04),
-    'q':(0x18,0x24,0x24,0x14,0x7C),'j':(0x20,0x40,0x44,0x3D,0x00),
-    's':(0x48,0x54,0x54,0x54,0x20),'m':(0x7C,0x04,0x18,0x04,0x78),
+    ' ':(0x00,0x00,0x00,0x00,0x00), '!':(0x00,0x00,0x5F,0x00,0x00), '"':(0x00,0x07,0x00,0x07,0x00), '#':(0x14,0x7F,0x14,0x7F,0x14),
+    '$':(0x24,0x2A,0x7F,0x2A,0x12), '%':(0x23,0x13,0x08,0x64,0x62), '&':(0x36,0x49,0x56,0x20,0x50), "'":(0x00,0x08,0x07,0x03,0x00),
+    '(':(0x00,0x1C,0x22,0x41,0x00), ')':(0x00,0x41,0x22,0x1C,0x00), '*':(0x2A,0x1C,0x7F,0x1C,0x2A), '+':(0x08,0x08,0x3E,0x08,0x08),
+    ',':(0x00,0x80,0x70,0x30,0x00), '-':(0x08,0x08,0x08,0x08,0x08), '.':(0x00,0x00,0x60,0x60,0x00), '/':(0x20,0x10,0x08,0x04,0x02),
+    '0':(0x3E,0x51,0x49,0x45,0x3E), '1':(0x00,0x42,0x7F,0x40,0x00), '2':(0x72,0x49,0x49,0x49,0x46), '3':(0x21,0x41,0x49,0x4D,0x33),
+    '4':(0x18,0x14,0x12,0x7F,0x10), '5':(0x27,0x45,0x45,0x45,0x39), '6':(0x3C,0x4A,0x49,0x49,0x31), '7':(0x41,0x21,0x11,0x09,0x07),
+    '8':(0x36,0x49,0x49,0x49,0x36), '9':(0x46,0x49,0x49,0x29,0x1E), ':':(0x00,0x00,0x14,0x00,0x00), ';':(0x00,0x40,0x34,0x00,0x00),
+    '<':(0x00,0x08,0x14,0x22,0x41), '=':(0x14,0x14,0x14,0x14,0x14), '>':(0x00,0x41,0x22,0x14,0x08), '?':(0x02,0x01,0x59,0x09,0x06),
+    '@':(0x3E,0x41,0x5D,0x59,0x4E), 'A':(0x7C,0x12,0x11,0x12,0x7C), 'B':(0x7F,0x49,0x49,0x49,0x36), 'C':(0x3E,0x41,0x41,0x41,0x22),
+    'D':(0x7F,0x41,0x41,0x41,0x3E), 'E':(0x7F,0x49,0x49,0x49,0x41), 'F':(0x7F,0x09,0x09,0x09,0x01), 'G':(0x3E,0x41,0x41,0x51,0x73),
+    'H':(0x7F,0x08,0x08,0x08,0x7F), 'I':(0x00,0x41,0x7F,0x41,0x00), 'J':(0x20,0x40,0x41,0x3F,0x01), 'K':(0x7F,0x08,0x14,0x22,0x41),
+    'L':(0x7F,0x40,0x40,0x40,0x40), 'M':(0x7F,0x02,0x1C,0x02,0x7F), 'N':(0x7F,0x04,0x08,0x10,0x7F), 'O':(0x3E,0x41,0x41,0x41,0x3E),
+    'P':(0x7F,0x09,0x09,0x09,0x06), 'Q':(0x3E,0x41,0x51,0x21,0x5E), 'R':(0x7F,0x09,0x19,0x29,0x46), 'S':(0x26,0x49,0x49,0x49,0x32),
+    'T':(0x03,0x01,0x7F,0x01,0x03), 'U':(0x3F,0x40,0x40,0x40,0x3F), 'V':(0x1F,0x20,0x40,0x20,0x1F), 'W':(0x3F,0x40,0x38,0x40,0x3F),
+    'X':(0x63,0x14,0x08,0x14,0x63), 'Y':(0x03,0x04,0x78,0x04,0x03), 'Z':(0x61,0x59,0x49,0x4D,0x43), '[':(0x00,0x7F,0x41,0x41,0x41),
+    '\\':(0x02,0x04,0x08,0x10,0x20), ']':(0x00,0x41,0x41,0x41,0x7F), '^':(0x04,0x02,0x01,0x02,0x04), '_':(0x40,0x40,0x40,0x40,0x40),
+    '`':(0x00,0x03,0x07,0x08,0x00), 'a':(0x20,0x54,0x54,0x78,0x40), 'b':(0x7F,0x28,0x44,0x44,0x38), 'c':(0x38,0x44,0x44,0x44,0x28),
+    'd':(0x38,0x44,0x44,0x28,0x7F), 'e':(0x38,0x54,0x54,0x54,0x18), 'f':(0x00,0x08,0x7E,0x09,0x02), 'g':(0x18,0xA4,0xA4,0x9C,0x78),
+    'h':(0x7F,0x08,0x04,0x04,0x78), 'i':(0x00,0x44,0x7D,0x40,0x00), 'j':(0x20,0x40,0x40,0x3D,0x00), 'k':(0x7F,0x10,0x28,0x44,0x00),
+    'l':(0x00,0x41,0x7F,0x40,0x00), 'm':(0x7C,0x04,0x78,0x04,0x78), 'n':(0x7C,0x08,0x04,0x04,0x78), 'o':(0x38,0x44,0x44,0x44,0x38),
+    'p':(0xFC,0x18,0x24,0x24,0x18), 'q':(0x18,0x24,0x24,0x18,0xFC), 'r':(0x7C,0x08,0x04,0x04,0x08), 's':(0x48,0x54,0x54,0x54,0x24),
+    't':(0x04,0x04,0x3F,0x44,0x24), 'u':(0x3C,0x40,0x40,0x20,0x7C), 'v':(0x1C,0x20,0x40,0x20,0x1C), 'w':(0x3C,0x40,0x30,0x40,0x3C),
+    'x':(0x44,0x28,0x10,0x28,0x44), 'y':(0x4C,0x90,0x90,0x90,0x7C), 'z':(0x44,0x64,0x54,0x4C,0x44), '{':(0x00,0x08,0x36,0x41,0x00),
+    '|':(0x00,0x00,0x77,0x00,0x00), '}':(0x00,0x41,0x36,0x08,0x00), '~':(0x02,0x01,0x02,0x04,0x02),
 }
 
 TTC_MAX = 99.9
@@ -189,7 +199,9 @@ class _ILI9341:
             self._write(list(data))
 
     def _init_panel(self) -> None:
-        madctl = 0x48   # portrait, BGR
+        # Landscape: 90° = MV|BGR (0x28), 270° = MX|MY|MV|BGR (0xE8).
+        # Jika tampilan terbalik di prototipe, ganti LCD_ROTATION di constants.py.
+        madctl = 0xE8 if LCD_ROTATION == 270 else 0x28
         seq = [
             (0x01, None,                                                      0.15),
             (0xEF, [0x03,0x80,0x02],                                          0),
@@ -240,7 +252,7 @@ class _ILI9341:
 # Framebuffer in-memory
 # ─────────────────────────────────────────────────────────────────────────────
 class _Frame:
-    """Salinan layar 240×320 di memori (2 byte/piksel, big-endian)."""
+    """Salinan layar LCD_W×LCD_H (320×240) di memori (2 byte/piksel, big-endian)."""
 
     def __init__(self, lcd: _ILI9341) -> None:
         self.lcd = lcd
@@ -330,7 +342,7 @@ def _line(s: _Frame, x0: int, y0: int, x1: int, y1: int, c: int) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer UI (identik dengan lcdcapstone.py)
+# Layer UI — landscape 320×240
 # ─────────────────────────────────────────────────────────────────────────────
 # Warna indikator GPS
 _GPS_COL = {
@@ -347,152 +359,199 @@ _GPS_LABEL = {
 }
 
 def _draw_gps_indicator(f: _Frame, gps_status: str) -> None:
-    """Gambar indikator GPS kecil di kiri header, sebelah kiri teks AMCAS."""
+    """Indikator GPS di tengah header (antara AMCAS dan ● ACTIVE)."""
     f.rect(*R_GPS, HEADER)   # bersihkan area dulu
     col   = _GPS_COL.get(gps_status, DIM)
     label = _GPS_LABEL.get(gps_status, '???')
-    _fill_circle(f, 9, 16, 4, col)
-    _text(f, label, 18, 9, 2, col)
+    _fill_circle(f, 88, 15, 4, col)
+    _text(f, label, 98, 9, 2, col)
 
 def _draw_boot_icon(f: _Frame, cx: int, cy: int, r: int, status: str) -> None:
     """
-    Gambar ikon status boot sebagai dua lingkaran konsentris — tanpa teks.
-
-    Menghindari artefak "kotak hitam" yang terjadi saat _text() dipakai di
-    atas lingkaran berwarna: _text() hanya menggambar piksel '1' pada bitmap
-    font, sehingga piksel '0' (background glyph) tidak dicat — tapi saat
-    warna teks = BG (hitam), piksel '1' justru menjadi hitam di atas circle.
-
-    Pendekatan baru: ikon murni berbasis dua lingkaran konsentris:
-        - Luar (r)     : warna status
-        - Dalam (r//2) : BG untuk 'wait'/'warn'  (menunjukkan "pending/hati-hati")
-        - Dalam (r//2) : warna lebih terang untuk 'ok' (solid filled = sukses)
-        - Dalam (r//2) : BG dengan inti merah gelap untuk 'fail'
+    Ikon status boot: dua lingkaran konsentris — tanpa teks.
+        - 'ok'   : cincin hijau + titik hijau di tengah
+        - 'fail' : cincin merah + titik merah di tengah
+        - 'wait' / 'warn' : cincin polos (abu / amber)
     """
     col = BOOT_COL.get(status, DIM)
-    _fill_circle(f, cx, cy, r, col)                   # lingkaran luar (status color)
+    _fill_circle(f, cx, cy, r, col)
+    _fill_circle(f, cx, cy, r - 3, BG)
     if status == 'ok':
-        # Lingkaran dalam lebih kecil, warna BG → membentuk cincin hijau
-        _fill_circle(f, cx, cy, r - 3, BG)
-        # Titik pusat solid hijau kecil sebagai konfirmasi
         _fill_circle(f, cx, cy, 2, col)
     elif status == 'fail':
-        # Cincin merah, isi BG, titik merah gelap di tengah
-        _fill_circle(f, cx, cy, r - 3, BG)
         _fill_circle(f, cx, cy, 2, RED)
-    else:
-        # 'wait' / 'warn': lingkaran dalam BG → cincin polos
-        _fill_circle(f, cx, cy, r - 3, BG)
+
+
+def _draw_header(f: _Frame, right_label: str, right_col: int) -> None:
+    """Header 320×33: AMCAS kiri, label status rata kanan (berakhir di x=311)."""
+    f.rect(0, 0, LCD_W, 32, HEADER)
+    f.rect(0, 32, LCD_W, 1, LINE)
+    _text(f, "AMCAS", 8, 9, 2, TEXT)
+    x = 312 - len(right_label) * 12
+    _fill_circle(f, x - 10, 15, 4, right_col)
+    _text(f, right_label, x, 9, 2, right_col)
 
 
 def _draw_boot_screen(f: _Frame, items: list) -> None:
     """
-    Gambar layar boot status.
+    Gambar layar boot status (landscape 320×240).
 
     items : list of (label_str, status_str)
-        label_str  — nama komponen, maks ~14 karakter agar muat di 240px
+        label_str  — nama komponen (maks ~20 karakter)
         status_str — 'wait' | 'ok' | 'fail' | 'warn'
 
-    Layout (portrait 240×320):
-        Header bar  : "AMCAS  BOOTING..."
-        Per item    : [ICON] LABEL
-        Subtitle    : "Capstone B-01"
-        Footer      : progress bar dari jumlah item 'ok'
+    Layout:
+        Header      : "AMCAS            ● BOOTING"
+        Daftar item : y 42, 70, 98, 126, 154  →  [IKON] LABEL
+        Subtitle    : "Capstone B-01"  (tengah, y 188)
+        Progress    : bar x 8–311, y 214–229, persentase di tengah bar
     """
     f.rect(0, 0, LCD_W, LCD_H, BG)
+    _draw_header(f, "BOOTING", AMBER)
 
-    # Header
-    f.rect(0, 0, 240, 32, HEADER)
-    f.rect(0, 32, 240, 1, LINE)
-    _text(f, "AMCAS", 8, 9, 2, TEXT)
-    _text(f, "BOOTING", 142, 9, 2, AMBER)
-
-    # Item list — mulai y=48, setiap baris 26px
     for i, (label, status) in enumerate(items):
-        y   = 48 + i * 26
+        y   = 42 + i * 28
         col = BOOT_COL.get(status, DIM)
-        # Ikon dua lingkaran konsentris — tanpa teks di atas circle
-        _draw_boot_icon(f, 16, y + 8, 7, status)
-        # Label
-        _text(f, label, 32, y + 4, 2, col)
+        _draw_boot_icon(f, 20, y + 8, 7, status)
+        _text(f, label, 36, y + 2, 2, col)
 
-    # Subtitle "Capstone B-01" — di atas progress bar
-    _text(f, "Capstone B-01", 44, 280, 2, TEXT2)
+    sub = "Capstone B-01"
+    _text(f, sub, 160 - (len(sub) * 12 - 2) // 2, 188, 2, TEXT2)
 
-    # Progress bar bawah
     n_ok    = sum(1 for _, s in items if s == 'ok')
     n_total = len(items) if items else 1
-    bar_w   = int((n_ok / n_total) * 224)
-    f.rect(8,  300, 224, 12, LINE)           # background bar
-    f.rect(8,  300, bar_w, 12, GREEN)        # fill
-    pct_str = f"{int(n_ok/n_total*100)}."    # misal "75."
-    _text(f, pct_str, 96, 301, 2, TEXT2)
+    bar_w   = int((n_ok / n_total) * 304)
+    f.rect(8, 214, 304, 16, LINE)
+    f.rect(8, 214, bar_w, 16, GREEN)
+    pct_str = f"{int(n_ok / n_total * 100)}%"
+    _text(f, pct_str, 160 - (len(pct_str) * 12 - 2) // 2, 215, 2, TEXT)
+
+
+# ── Splash screen (landscape 320×240) ────────────────────────────────────────
+#   Logo bracket + bus mini  x 128–191, y 24–75
+#   AMCAS (size 5)           x  87–231, y 90–124, garis pemindai y 132
+#   Subjudul (size 2)        y 146      Progress bar x 60–259, y 186–191
+#   "INITIALIZING SYSTEM..." y 198      Footer "BUS KAMPUS UGM" y 222
+SPLASH_SUBTITLE = "PERINGATAN DINI TABRAKAN"
+
+def _splash_brackets(f: _Frame) -> None:
+    x, y, w, h, L, t = 128, 24, 64, 52, 10, 2
+    f.rect(x, y, L, t, CYAN);            f.rect(x, y, t, L, CYAN)
+    f.rect(x+w-L, y, L, t, CYAN);        f.rect(x+w-t, y, t, L, CYAN)
+    f.rect(x, y+h-t, L, t, CYAN);        f.rect(x, y+h-L, t, L, CYAN)
+    f.rect(x+w-L, y+h-t, L, t, CYAN);    f.rect(x+w-t, y+h-L, t, L, CYAN)
+
+def _splash_bus(f: _Frame) -> None:
+    f.rect(136, 38, 3, 7, CYAN);  f.rect(139, 38, 1, 2, CYAN)
+    f.rect(181, 38, 3, 7, CYAN);  f.rect(180, 38, 1, 2, CYAN)
+    _fill_rr(f, 140, 32, 40, 34, 4, CYAN)
+    f.rect(145, 37, 30, 12, BG)
+    f.rect(145, 55, 6, 4, BG);    f.rect(169, 55, 6, 4, BG)
+    f.rect(143, 61, 34, 2, BG)
+    f.rect(146, 66, 7, 5, DIM);   f.rect(167, 66, 7, 5, DIM)
+
+def _run_splash(f: _Frame) -> None:
+    """Splash ±2,3 detik (blocking). Tiap langkah hanya mengirim area yang berubah."""
+    f.rect(0, 0, LCD_W, LCD_H, BG)
+    _splash_brackets(f)
+    f.rect(60, 186, 200, 1, LINE); f.rect(60, 191, 200, 1, LINE)       # Progress_Track
+    f.rect(60, 186, 1, 6, LINE);   f.rect(259, 186, 1, 6, LINE)
+    _text(f, "INITIALIZING SYSTEM...", 94, 198, 1, TEXT2)
+    _text(f, "BUS KAMPUS UGM", 118, 222, 1, DIM)
+    f.push()
+    time.sleep(0.3)
+    _splash_bus(f);  f.push(128, 24, 64, 52)                             # Bus_Mini
+    time.sleep(0.4)
+    for i, ch in enumerate("AMCAS"):                                     # 1 huruf / 80 ms
+        _text(f, ch, 87 + i * 30, 90, 5, TEXT)
+        f.rect(87 + i * 29, 132, 29, 2, CYAN)                            # Scan_Line
+        f.push(87, 90, 146, 44)
+        time.sleep(0.08)
+    time.sleep(0.1)
+    w = len(SPLASH_SUBTITLE) * 12 - 2
+    _text(f, SPLASH_SUBTITLE, 160 - w // 2, 146, 2, TEXT2)
+    f.push(0, 144, LCD_W, 18)
+    for k in range(1, 11):                                               # progress 0,9 s
+        f.rect(61, 187, 198 * k // 10, 4, CYAN)
+        f.push(60, 186, 200, 6)
+        time.sleep(0.09)
+    time.sleep(0.3)
 
 
 def _draw_static(f: _Frame) -> None:
-    f.rect(0,0,LCD_W,LCD_H,BG)
-    f.rect(0,0,240,32,HEADER); f.rect(0,32,240,1,LINE)
-    _text(f,"AMCAS",8,9,2,TEXT)
-    _fill_circle(f,150,15,4,CYAN); _text(f,"ACTIVE",160,9,2,CYAN)
-    _draw_rr(f,8,118,224,38,4,LINE)
-    _text(f,"JARAK",16,130,2,TEXT2); _text(f,"m",212,133,2,TEXT2)
-    f.rect(8,244,224,1,LINE)
-    _line(f,20,243,58,176,DIM); _line(f,219,243,181,176,DIM)
+    f.rect(0, 0, LCD_W, LCD_H, BG)
+    _draw_header(f, "ACTIVE", CYAN)
 
 def _draw_ttc(f: _Frame, st: int, s_ttc: str) -> None:
+    """Panel TTC kiri: label size 2, angka size 5, satuan size 3."""
     f.rect(*R_TTC, BG)
-    _draw_rr(f,8,40,224,72,4,STYLE[st][2])
-    _text(f,"TTC",16,48,2,TEXT2)
-    _text(f,s_ttc,16,68,5,STYLE[st][1])
-    _text(f,"s",16+len(s_ttc)*30+4,82,3,TEXT2)
+    _draw_rr(f, 8, 40, 148, 72, 4, STYLE[st][2])
+    _text(f, "TTC", 16, 48, 2, TEXT2)
+    _text(f, s_ttc, 16, 68, 5, STYLE[st][1])
+    _text(f, "s", 16 + len(s_ttc) * 30 + 4, 82, 3, TEXT2)
 
 def _draw_dist(f: _Frame, s_dist: str) -> None:
+    """Panel JARAK kanan: label size 2, angka size 4, satuan size 2."""
     f.rect(*R_DIST, BG)
-    _text(f,s_dist,208-len(s_dist)*18,126,3,TEXT)
+    _draw_rr(f, 164, 40, 148, 72, 4, LINE)
+    _text(f, "JARAK", 172, 48, 2, TEXT2)
+    _text(f, s_dist, 172, 70, 4, TEXT)
+    _text(f, "m", 172 + len(s_dist) * 24 + 4, 84, 2, TEXT2)
 
 def _draw_bus(f: _Frame, st: int) -> None:
+    """Area deteksi kiri: jalan, bus tampak belakang, bracket target."""
     c = STYLE[st][1]
-    f.rect(62,164,116,80,BG)
-    f.rect(75,180,4,12,c); f.rect(79,180,3,2,c)
-    f.rect(161,180,4,12,c); f.rect(158,180,3,2,c)
-    _fill_rr(f,82,172,76,62,6,c)
-    f.rect(88,178,64,24,BG); f.rect(88,214,12,6,BG); f.rect(140,214,12,6,BG)
-    f.rect(86,225,68,3,BG); f.rect(90,234,12,8,DIM); f.rect(138,234,12,8,DIM)
-    b = STYLE[st][3]
-    bx,by,bw,bh,L,t = 64,164,112,80,12,2
-    f.rect(bx,by,L,t,b);            f.rect(bx,by,t,L,b)
-    f.rect(bx+bw-L,by,L,t,b);       f.rect(bx+bw-t,by,t,L,b)
-    f.rect(bx,by+bh-t,L,t,b);       f.rect(bx,by+bh-L,t,L,b)
-    f.rect(bx+bw-L,by+bh-t,L,t,b);  f.rect(bx+bw-t,by+bh-L,t,L,b)
+    f.rect(3, 116, 134, 76, BG)
+    f.rect(8, 190, 128, 1, LINE)                              # Road_Ground
+    _line(f, 8, 189, 17, 124, DIM)                            # Lane_Left
+    _line(f, 131, 189, 122, 124, DIM)                         # Lane_Right
+    f.rect(32, 131, 4, 12, c);  f.rect(36, 131, 2, 2, c)      # Mirror_L
+    f.rect(104, 131, 4, 12, c); f.rect(102, 131, 2, 2, c)     # Mirror_R
+    _fill_rr(f, 38, 123, 64, 56, 6, c)                        # Body
+    f.rect(44, 129, 52, 24, BG)                               # Rear_Window
+    f.rect(44, 161, 10, 6, BG); f.rect(86, 161, 10, 6, BG)    # Lamp_L / Lamp_R
+    f.rect(42, 171, 56, 3, BG)                                # Bumper
+    f.rect(46, 179, 12, 8, DIM); f.rect(82, 179, 12, 8, DIM)  # Wheel_L / Wheel_R
+    b = STYLE[st][3]                                          # Target_Brackets
+    bx, by, bw, bh, L, t = 20, 117, 100, 72, 12, 2
+    f.rect(bx, by, L, t, b);            f.rect(bx, by, t, L, b)
+    f.rect(bx+bw-L, by, L, t, b);       f.rect(bx+bw-t, by, t, L, b)
+    f.rect(bx, by+bh-t, L, t, b);       f.rect(bx, by+bh-L, t, L, b)
+    f.rect(bx+bw-L, by+bh-t, L, t, b);  f.rect(bx+bw-t, by+bh-L, t, L, b)
 
 def _draw_detect_text(f: _Frame, st: int) -> None:
-    f.rect(24,252,194,16,BG)
-    _text(f,"OBJEK TERDETEKSI",25,252,2,STYLE[st][4])
+    """Teks deteksi di kanan bus, dua baris."""
+    f.rect(140, 128, 172, 50, BG)
+    _text(f, "OBJEK", 148, 134, 2, STYLE[st][4])
+    _text(f, "TERDETEKSI", 148, 156, 2, STYLE[st][4])
 
 def _draw_status_bar(f: _Frame, st: int) -> None:
-    name,acc,_,_,_,fill,txt,outline = STYLE[st]
-    f.rect(8,276,224,36,BG)
-    _fill_rr(f,8,276,224,36,4,fill)
-    if outline: _draw_rr(f,8,276,224,36,4,acc)
+    name, acc, _, _, _, fill, txt, outline = STYLE[st]
+    f.rect(8, 196, 304, 36, BG)
+    _fill_rr(f, 8, 196, 304, 36, 4, fill)
+    if outline:
+        _draw_rr(f, 8, 196, 304, 36, 4, acc)
     gw = 22 + len(name) * 18
-    sx = 120 - gw // 2
-    _fill_circle(f,sx+6,294,6,txt)
-    _text(f,name,sx+22,284,3,txt)
+    sx = 160 - gw // 2
+    _fill_circle(f, sx + 6, 214, 6, txt)
+    _text(f, name, sx + 22, 204, 3, txt)
 
 def _draw_border(f: _Frame, on: bool) -> None:
+    W, H = LCD_W, LCD_H
     if on:
-        f.rect(0,0,240,3,RED); f.rect(0,317,240,3,RED)
-        f.rect(0,0,3,320,RED); f.rect(237,0,3,320,RED)
-    else:
-        f.rect(0,0,240,3,HEADER)
-        f.rect(0,0,3,32,HEADER); f.rect(237,0,3,32,HEADER)
-        f.rect(0,32,3,1,LINE);   f.rect(237,32,3,1,LINE)
-        f.rect(0,33,3,287,BG);   f.rect(237,33,3,287,BG)
-        f.rect(0,317,240,3,BG)
+        f.rect(0, 0, W, 3, RED); f.rect(0, H - 3, W, 3, RED)
+        f.rect(0, 0, 3, H, RED); f.rect(W - 3, 0, 3, H, RED)
+    else:                     # kembalikan warna asli di bawah border
+        f.rect(0, 0, W, 3, HEADER)
+        f.rect(0, 0, 3, 32, HEADER); f.rect(W - 3, 0, 3, 32, HEADER)
+        f.rect(0, 32, 3, 1, LINE);   f.rect(W - 3, 32, 3, 1, LINE)
+        f.rect(0, 33, 3, H - 33, BG); f.rect(W - 3, 33, 3, H - 33, BG)
+        f.rect(0, H - 3, W, 3, BG)
 
 def _push_border(f: _Frame) -> None:
-    f.push(0,0,240,3); f.push(0,317,240,3)
-    f.push(0,3,3,314); f.push(237,3,3,314)
+    W, H = LCD_W, LCD_H
+    f.push(0, 0, W, 3); f.push(0, H - 3, W, 3)
+    f.push(0, 3, 3, H - 6); f.push(W - 3, 3, 3, H - 6)
 
 def _fmt(ttc: float, dist: float):
     s_ttc  = "--.-" if ttc > TTC_MAX else f"{ttc:.1f}"
@@ -553,6 +612,8 @@ class ACASDisplay:
             self._lcd   = _ILI9341()
             self._frame = _Frame(self._lcd)
             log.info("[lcd] Hardware diinisialisasi.")
+            if LCD_SPLASH_ENABLED:
+                _run_splash(self._frame)
             return True
         except Exception as e:
             log.error("[lcd] Gagal inisialisasi hardware: %s", e)

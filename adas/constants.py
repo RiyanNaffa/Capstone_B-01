@@ -44,7 +44,7 @@ GPIO_CHIP    = "/dev/gpiochip0"
 
 # GPIO line number — diambil dari lcdcapstone.py yang sudah terbukti jalan
 BUZZER_ENABLED = False  # Set True untuk aktifkan buzzer, False untuk tes tanpa bunyi
-BUZZER_LINE  = 257      # PI1 (PWM0, pin fisik 12) → bank I (8×32) + 1 = 257
+BUZZER_LINE  = 257      # PI1 (pin fisik 12) → bank I (8×32) + 1 = 257
 LCD_DC_LINE  = 228   # PIN_DC  di lcdcapstone.py = 228
 LCD_RST_LINE = 262   # PIN_RST di lcdcapstone.py = 262
 
@@ -192,7 +192,9 @@ LK_PARAMS = dict(
 # ===========================================================================
 SPI_SPEED_HZ = 40_000_000  # 40 MHz; turunkan ke 16 MHz jika gambar rusak
 SPI_CHUNK    = 4096         # bytes per transfer (batas buffer spidev)
-LCD_W, LCD_H = 240, 320     # resolusi ILI9341 portrait
+LCD_W, LCD_H = 320, 240     # resolusi ILI9341 LANDSCAPE (lebar × tinggi)
+LCD_ROTATION = 90           # 90 atau 270 — ganti ke 270 jika tampilan terbalik di prototipe
+LCD_SPLASH_ENABLED = True   # splash AMCAS ±2,3 s saat LCD pertama menyala (False = lewati)
 
 # ===========================================================================
 # PERFORMA
