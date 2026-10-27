@@ -35,7 +35,7 @@ except ImportError:
 
 # ── Konfigurasi ──────────────────────────────────────────────────────────────
 CHECKERBOARD  = (9, 6)
-SQUARE_SIZE_M = 0.033        # meter — kotak 3.3 cm, cetak A3 landscape (sesuai intrinsic.py)
+SQUARE_SIZE_M = 0.032        # meter (sesuai intrinsic.py)
 
 INTRINSIC_NPZ = "calib_intrinsic.npz"
 OUTPUT_NPZ    = "calib_extrinsic.npz"

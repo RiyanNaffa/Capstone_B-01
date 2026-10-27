@@ -1,4 +1,4 @@
-# Panduan Kalibrasi Kamera ADAS
+# Panduan Kalibrasi Kamera AMCAS
 
 Kalibrasi dilakukan **satu kali** saat development/pemasangan.  
 Pengguna/driver tidak perlu melakukan ini.
@@ -7,9 +7,9 @@ Pengguna/driver tidak perlu melakukan ini.
 
 ## Yang dibutuhkan
 
-- **Checkerboard** — cetak pola 10×7 kotak (sudut dalam 9×6) di kertas A3  
-  → Download: [opencv checkerboard generator](https://calib.io/pages/camera-calibration-pattern-generator)  
-  → Ukuran kotak: **2.5 cm** (sesuai `SQUARE_SIZE_M = 0.025` di script)  
+- **Checkerboard** — cetak pola 10×7 kotak (sudut dalam 9×6) di kertas A3
+  → Download: [opencv checkerboard generator](https://calib.io/pages/camera-calibration-pattern-generator)
+  → Ukuran kotak: **3.2 cm** (sesuai `SQUARE_SIZE_M = 0.032` di script)
   → Tempel di papan keras/kardus agar **flat, tidak melengkung**
 
 - **Meteran** — untuk mengukur jarak ground truth

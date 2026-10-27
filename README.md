@@ -123,12 +123,13 @@ du -sh /var/log/adas/
 
 ### Kamera USB
 ```bash
-# Cek apakah kamera OV5640 terdeteksi
-ls /dev/v4l/by-id/ | grep -i OV5640
+# Cek apakah kamera USB terdeteksi
+ls /dev/v4l/by-id/
+# Harus menampilkan '/dev/v4l/by-id/usb-HD_Camera_Manufacturer_HD_USB_Camera-video-index0' atau semacamnya
 
 # Info detail kamera
 v4l2-ctl --list-devices
-v4l2-ctl -d /dev/video0 --all
+v4l2-ctl -d /dev/video1 --all
 ```
 
 ### GPS (UART0)
@@ -197,7 +198,7 @@ sudo systemctl start adas.service
 | Gejala | Periksa |
 |--------|---------|
 | Service langsung restart | `journalctl -u adas.service -b -p err` |
-| Kamera tidak terdeteksi | `ls /dev/v4l/by-id/` — cek apakah OV5640 muncul |
+| Kamera tidak terdeteksi | `ls /dev/v4l/by-id/` — cek apakah kamera USB muncul |
 | GPS tidak dapat kecepatan | `cat /dev/ttyS0` — cek apakah ada output NMEA |
 | LCD tidak menampilkan | Cek `/dev/spidev1.0` ada; cek wiring RST/DC |
 | Buzzer tidak berbunyi | Cek `gpioinfo /dev/gpiochip0 \| grep 257` |

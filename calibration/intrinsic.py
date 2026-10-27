@@ -24,11 +24,8 @@ import sys
 # Checkerboard 10×7 kotak → sudut dalam = (9, 6)
 CHECKERBOARD = (9, 6)
 
-# Ukuran satu kotak dalam meter.
-# Cetak di A3 landscape, kotak 3.3 cm:
-#   canvas = (10+2×1) × (7+2×1) = 12×9 kotak (border 1 kotak per sisi)
-#   canvas px @96 DPI = 1497 × 1123 px — tepat muat di A3 landscape (1587×1123 px)
-SQUARE_SIZE_M = 0.033
+# Ukuran satu kotak real-life dalam meter.
+SQUARE_SIZE_M = 0.032
 
 IMAGE_DIR  = "calib_images"
 OUTPUT_NPZ = "calib_intrinsic.npz"
