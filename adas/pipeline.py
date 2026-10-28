@@ -68,7 +68,7 @@ class TTCDataLogger:
     """Merekam output TTC per objek ke CSV selama pipeline berjalan."""
 
     FIELDNAMES = [
-        "timestamp",
+        "timestamp",  # ISO-8601 local time, millisecond precision
         "elapsed_s",
         "frame_id",
         "track_id",
