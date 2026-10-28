@@ -20,11 +20,17 @@ Prerequisite:
     - Checkerboard diletakkan FLAT di tanah, tegak lurus sumbu kamera
 """
 
-import cv2
-import numpy as np
+import argparse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
 import math
 import os
-import sys
+import queue
+import threading
+import time
+
+import cv2
+import numpy as np
 
 try:
     from scipy.optimize import minimize_scalar, minimize
@@ -42,6 +48,72 @@ OUTPUT_NPZ    = "calib_extrinsic.npz"
 
 CAMERA_DEVICE   = "/dev/v4l/by-id/usb-HD_Camera_Manufacturer_HD_USB_Camera-video-index0"
 CAMERA_FALLBACK = "/dev/video1"
+WEB_HOST = "127.0.0.1"
+WEB_PORT = 8081
+JPEG_QUALITY = 80
+
+WEB_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Extrinsic Calibration</title>
+  <style>
+    body { font: 16px sans-serif; max-width: 720px; margin: 24px auto; padding: 0 12px; }
+    img { display: block; width: 100%; max-width: 512px; background: #222; }
+    button { font-size: 1.1rem; margin: 12px 8px 12px 0; padding: 10px 18px; }
+    #status { min-height: 1.5em; }
+  </style>
+</head>
+<body>
+  <h1>Extrinsic Calibration</h1>
+  <p>Place the checkerboard flat on the ground at the entered distance.
+  Wait for the green detected-corners overlay, then capture.</p>
+  <img src="/stream.mjpg" alt="Live camera preview">
+  <p><button id="capture">Capture detected checkerboard</button>
+  <button id="cancel">Cancel current capture</button></p>
+  <p id="status">Waiting for the checkerboard...</p>
+  <p>Capture button is enabled only while the board is detected. Stop the
+  calibration with Ctrl+C in the terminal.</p>
+  <script>
+    const status = document.getElementById("status");
+    const capture = document.getElementById("capture");
+    async function updateStatus() {
+      try {
+        const response = await fetch("/status", { cache: "no-store" });
+        const result = await response.json();
+        capture.disabled = !result.detected;
+        status.textContent = result.detected
+          ? "Checkerboard detected — ready to capture."
+          : "Waiting for the checkerboard to be detected...";
+      } catch (error) {
+        status.textContent = `Preview status error: ${error.message}`;
+      }
+    }
+    capture.onclick = async () => {
+      capture.disabled = true;
+      status.textContent = "Capturing...";
+      try {
+        const response = await fetch("/capture", { method: "POST" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || response.statusText);
+        status.textContent = "Checkerboard captured. Continue in the terminal.";
+      } catch (error) {
+        status.textContent = `Capture error: ${error.message}`;
+      }
+      updateStatus();
+    };
+    document.getElementById("cancel").onclick = async () => {
+      const response = await fetch("/cancel", { method: "POST" });
+      const result = await response.json();
+      status.textContent = result.message;
+    };
+    updateStatus();
+    setInterval(updateStatus, 500);
+  </script>
+</body>
+</html>
+"""
 
 # ── Helper IPM ───────────────────────────────────────────────────────────────
 def ipm_distance(v_px: float, H: float, pitch_deg: float, fy: float, cy: float) -> float:
@@ -67,44 +139,181 @@ def open_camera():
     return cap
 
 
-def capture_checkerboard_frame(cap, K, dist):
-    """
-    Tampilkan live feed. Pengguna tekan SPACE saat checkerboard terdeteksi.
-    Return: (frame, corners) atau None jika gagal.
-    """
-    print("\n  Arahkan kamera ke checkerboard yang ada di tanah.")
-    print("  Tekan SPACE saat checkerboard terdeteksi (kotak hijau), Q untuk batal.\n")
+class CameraFeed:
+    def __init__(self, cap):
+        self.cap = cap
+        self._lock = threading.Lock()
+        self._frame = None
+        self._corners = None
+        self._preview_jpeg = None
+        self._running = threading.Event()
+        self._running.set()
+        self.capture_requests = queue.Queue(maxsize=1)
+        self._thread = threading.Thread(target=self._read_frames, daemon=True)
 
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+    def start(self):
+        self._thread.start()
+        deadline = time.monotonic() + 5.0
+        while self.frame() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if self.frame() is None:
+            raise RuntimeError("No camera frames received within 5 seconds.")
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            continue
-
-        gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    def _read_frames(self):
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
         flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE
-        found, corners = cv2.findChessboardCorners(gray, CHECKERBOARD, flags)
+        while self._running.is_set():
+            ret, frame = self.cap.read()
+            if not ret or frame is None:
+                time.sleep(0.05)
+                continue
 
-        preview = frame.copy()
-        if found:
-            corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
-            cv2.drawChessboardCorners(preview, CHECKERBOARD, corners, found)
-            cv2.putText(preview, "TERDETEKSI — SPACE untuk ambil",
-                        (4, 12), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 255, 0), 1)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            found, corners = cv2.findChessboardCorners(gray, CHECKERBOARD, flags)
+            if found:
+                corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+            else:
+                corners = None
+
+            preview = frame.copy()
+            if corners is not None:
+                cv2.drawChessboardCorners(preview, CHECKERBOARD, corners, True)
+                label, color = "DETECTED - capture in browser", (0, 255, 0)
+            else:
+                label, color = "Waiting for checkerboard...", (0, 100, 255)
+            cv2.putText(preview, label, (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+            encoded, buffer = cv2.imencode(
+                ".jpg",
+                preview,
+                [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY],
+            )
+            if encoded:
+                with self._lock:
+                    self._frame = frame
+                    self._corners = corners
+                    self._preview_jpeg = buffer.tobytes()
+
+    def frame(self):
+        with self._lock:
+            return self._frame
+
+    def snapshot(self):
+        with self._lock:
+            if self._frame is None or self._corners is None:
+                return None, None
+            return self._frame.copy(), self._corners.copy()
+
+    def preview(self):
+        with self._lock:
+            return self._preview_jpeg
+
+    def detected(self):
+        with self._lock:
+            return self._corners is not None
+
+    def stop(self):
+        self._running.clear()
+        if self._thread.is_alive():
+            self._thread.join(timeout=2.0)
+
+
+class ExtrinsicHandler(BaseHTTPRequestHandler):
+    server_version = "ExtrinsicCalibration/1.0"
+
+    def log_message(self, fmt, *args):
+        print(f"[HTTP] {self.address_string()} - {fmt % args}")
+
+    def do_GET(self):
+        if self.path == "/":
+            body = WEB_PAGE.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/status":
+            self._send_json(200, {"detected": self.server.camera.detected()})
+        elif self.path == "/stream.mjpg":
+            self.send_response(200)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.end_headers()
+            try:
+                while self.server.camera._running.is_set():
+                    frame = self.server.camera.preview()
+                    if frame is None:
+                        time.sleep(0.05)
+                        continue
+                    self.wfile.write(b"--frame\r\n")
+                    self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                    self.wfile.write(f"Content-Length: {len(frame)}\r\n\r\n".encode("ascii"))
+                    self.wfile.write(frame)
+                    self.wfile.write(b"\r\n")
+                    self.wfile.flush()
+                    time.sleep(0.05)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
         else:
-            cv2.putText(preview, "Checkerboard tidak terdeteksi...",
-                        (4, 12), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 100, 255), 1)
+            self.send_error(404)
 
-        cv2.imshow("Extrinsic Calibration", preview)
-        key = cv2.waitKey(1) & 0xFF
+    def do_POST(self):
+        if self.path == "/capture":
+            frame, corners = self.server.camera.snapshot()
+            if frame is None or corners is None:
+                self._send_json(409, {"error": "Checkerboard is not detected yet."})
+                return
+            try:
+                self.server.camera.capture_requests.put_nowait((frame, corners))
+            except queue.Full:
+                self._send_json(409, {"error": "A capture is already waiting in the terminal."})
+                return
+            print("[OK] Checkerboard frame captured from browser.")
+            self._send_json(200, {"message": "Frame captured."})
+        elif self.path == "/cancel":
+            try:
+                self.server.camera.capture_requests.put_nowait(None)
+            except queue.Full:
+                self._send_json(409, {"error": "A capture request is already waiting."})
+                return
+            self._send_json(200, {"message": "Capture cancelled. Continue in the terminal."})
+        else:
+            self.send_error(404)
 
-        if key == ord(' ') and found:
-            cv2.destroyAllWindows()
-            return frame, corners
-        elif key == ord('q') or key == 27:
-            cv2.destroyAllWindows()
-            return None, None
+    def _send_json(self, status, result):
+        body = json.dumps(result).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class ExtrinsicServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+
+def start_capture_server(cap, host, port):
+    camera = CameraFeed(cap)
+    try:
+        camera.start()
+        server = ExtrinsicServer((host, port), ExtrinsicHandler)
+    except Exception:
+        camera.stop()
+        cap.release()
+        raise
+    server.camera = camera
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread
+
+
+def capture_checkerboard_frame(server):
+    print("\n  Buka halaman kalibrasi ekstrinsik di browser.")
+    print("  Tunggu sudut checkerboard terdeteksi, lalu tekan Capture.\n")
+    result = server.camera.capture_requests.get()
+    if result is None:
+        return None, None
+    return result
 
 
 def estimate_pitch_from_rvec(rvec) -> float:
@@ -147,6 +356,17 @@ def optimize_pitch(ground_truth_pts: list, H: float, fy: float, cy: float) -> fl
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Estimate camera pitch using a browser-based MJPEG preview."
+    )
+    parser.add_argument(
+        "--host",
+        default=WEB_HOST,
+        help="Address to bind (default: 127.0.0.1; use 0.0.0.0 for LAN access).",
+    )
+    parser.add_argument("--port", type=int, default=WEB_PORT, help="HTTP port (default: 8081).")
+    args = parser.parse_args()
+
     # ── Load hasil kalibrasi intrinsik ───────────────────────────────────────
     if not os.path.exists(INTRINSIC_NPZ):
         raise SystemExit(
@@ -184,6 +404,14 @@ def main():
 
     # ── Buka kamera dan ambil frame ───────────────────────────────────────────
     cap = open_camera()
+    capture_server, capture_thread = start_capture_server(cap, args.host, args.port)
+    if args.host == "0.0.0.0":
+        print("[WARN] Calibration page is accessible on this network; use a trusted network.")
+        page_host = "<ORANGE_PI_IP>"
+    else:
+        page_host = "127.0.0.1"
+    print(f"\n  Buka http://{page_host}:{args.port}/ di browser.")
+    print("  Live preview akan menandai checkerboard jika pola terdeteksi.")
 
     # ── Metode 1: Estimasi pitch dari solvePnP ────────────────────────────────
     print(f"\n{'─'*55}")
@@ -194,7 +422,7 @@ def main():
     objp[:, :2] = np.mgrid[0:CHECKERBOARD[0], 0:CHECKERBOARD[1]].T.reshape(-1, 2)
     objp *= SQUARE_SIZE_M
 
-    frame, corners = capture_checkerboard_frame(cap, K, dist)
+    frame, corners = capture_checkerboard_frame(capture_server)
 
     pitch_solvepnp = None
     ground_truth_pts = []
@@ -225,8 +453,8 @@ def main():
     print("  METODE 2: Optimizer pitch dari multiple ground truth")
     print(f"{'─'*55}")
     print("  Opsional: tambah ground truth dari jarak lain untuk akurasi lebih baik.")
-    print("  Letakkan checkerboard di jarak berbeda, tekan SPACE untuk ambil.")
-    print("  Tekan Q jika sudah cukup.\n")
+    print("  Letakkan checkerboard di jarak berbeda, lalu ambil dari browser.")
+    print("  Klik Cancel current capture jika pengukuran tambahan tidak diperlukan.\n")
 
     more = input("  Tambah pengukuran jarak lain? (y/N): ").strip().lower()
     while more == 'y':
@@ -235,7 +463,7 @@ def main():
         except ValueError:
             break
 
-        frame2, corners2 = capture_checkerboard_frame(cap, K, dist)
+        frame2, corners2 = capture_checkerboard_frame(capture_server)
         if frame2 is not None and corners2 is not None:
             v_mean2 = float(np.mean(corners2[:, 0, 1]))
             ground_truth_pts.append((v_mean2, d_extra))
@@ -243,6 +471,10 @@ def main():
 
         more = input("  Tambah lagi? (y/N): ").strip().lower()
 
+    capture_server.shutdown()
+    capture_server.server_close()
+    capture_thread.join(timeout=2.0)
+    capture_server.camera.stop()
     cap.release()
 
     # ── Optimasi pitch ────────────────────────────────────────────────────────
