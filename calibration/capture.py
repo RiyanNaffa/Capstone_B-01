@@ -147,6 +147,12 @@ class CameraFeed:
             if not ret or frame is None:
                 time.sleep(0.05)
                 continue
+            # Resize to target resolution in case the driver ignores the
+            # CAP_PROP_FRAME_WIDTH/HEIGHT request (e.g. MJPEG-only cameras
+            # that only support fixed native resolutions like 320×240).
+            h, w = frame.shape[:2]
+            if w != CAPTURE_W or h != CAPTURE_H:
+                frame = cv2.resize(frame, (CAPTURE_W, CAPTURE_H), interpolation=cv2.INTER_LINEAR)
             encoded, buffer = cv2.imencode(
                 ".jpg",
                 frame,
