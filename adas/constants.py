@@ -12,9 +12,9 @@ Daftar interface:
     - MISO  -> Pin 21:  SPI1_MISO   | PH8
     - CLK   -> Pin 23:  SPI1_CLK    | PH6
     - CS    -> Pin 24:  SPI1_CS0    | PH5
-    - RST   -> Pin 26:  GPIO262     | PI6
-    - DC    -> Pin 22:  GPIO228     | PH4
-    - LED   -> Pin 18               | 3.3V
+    - RST   -> Pin 22:  GPIO262     | PI6
+    - DC    -> Pin 18:  GPIO228     | PH4
+    - LED   -> Pin 17               | 3.3V
 - Buzzer: GPIO
     - Base  -> Pin 12: GPIO257      | PI1 
 - Camera: USB HD Camera (v4l2)
@@ -34,7 +34,7 @@ MODEL_PATH   = "/opt/adas/models/best_int8.tflite"
 LOG_DIR      = "/var/log/adas/"
 VENV_PYTHON  = "/opt/adas/.venv/bin/python3"
 
-GPS_PORT     = "/dev/ttyS5"        # UART5 (sesuai hardware aktual, ubah ke ttyS0 saat pindah ke UART0)
+GPS_PORT     = "/dev/ttyS0"        # UART0 (sesuai hardware aktual, ubah ke ttyS0 saat pindah ke UART0)
 GPS_BAUD     = 9600                # Baud rate standar modul GPS NMEA 0183
 
 SPI_BUS      = 1                   # /dev/spidev1.0 → SPI1 header 40-pin
@@ -206,6 +206,7 @@ FPS_TARGET          = 10    # target inferensi (realistis untuk H618 tanpa NPU)
 # ===========================================================================
 # RECORDING
 # ===========================================================================
+# RECORD_ENABLED mengaktifkan AVI raw, AVI annotated, dan CSV TTC per frame.
 RECORD_ENABLED   = True              # False = nonaktifkan semua recording
 RECORD_DIR       = "/opt/adas/recordings"
 # Rekam dua track sekaligus:

@@ -7,17 +7,19 @@ After=sysinit.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c '\
-    echo 1 > /sys/class/pwm/pwmchip0/export || true; \
+ExecStart=/bin/sh -ec '\
+    pwm=/sys/class/pwm/pwmchip0/pwm1; \
+    if [ ! -d "$pwm" ]; then \
+        echo 1 > /sys/class/pwm/pwmchip0/export; \
+    fi; \
     sleep 0.1; \
-    echo 0      > /sys/class/pwm/pwmchip0/pwm1/enable; \
-    echo 40000000 > /sys/class/pwm/pwmchip0/pwm1/period; \
-    echo 40000000 > /sys/class/pwm/pwmchip0/pwm1/duty_cycle; \
-    echo 1      > /sys/class/pwm/pwmchip0/pwm1/enable'
+    echo 40000000 > "$pwm/period"; \
+    echo 40000000 > "$pwm/duty_cycle"; \
+    echo 1 > "$pwm/enable"'
 ExecStop=/bin/sh -c '\
     echo 0 > /sys/class/pwm/pwmchip0/pwm1/duty_cycle || true; \
     echo 0 > /sys/class/pwm/pwmchip0/pwm1/enable      || true; \
-    echo 2 > /sys/class/pwm/pwmchip0/unexport          || true'
+    echo 1 > /sys/class/pwm/pwmchip0/unexport          || true'
 
 [Install]
 WantedBy=multi-user.target
