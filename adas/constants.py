@@ -68,23 +68,10 @@ CLASS_NAMES      = ['bus', 'mobil', 'motor', 'truk']
 # ===========================================================================
 # KAMERA & IPM
 # ===========================================================================
-# Parameter dari video-vehicle_distance_ipm-pi.py (perhitungan manual ground truth)
-# Lebih akurat dari estimasi teoritis sebelumnya — ganti dengan hasil kalibrasi
-# checkerboard (calibration/) jika sudah dilakukan.
-# FOCAL_LENGTH_PX di-scale dari resolusi kalibrasi 640×480 ke model 256×256:
-#   fx_256 = 554.3 × (256 / 640) = 221.7
 CAMERA_HEIGHT_M        = 2.10    # meter
-CAMERA_PITCH_DEG       = 12.0    # derajat ke bawah
-FOCAL_LENGTH_PX        = 221.7   # piksel (scale dari 554.3 @ 640px → 256px)
+CAMERA_PITCH_DEG       = 9.0    # derajat ke bawah
+FOCAL_LENGTH_PX        = 213.7   # piksel
 CAMERA_VEHICLE_WIDTH_M = 2.20    # meter (lebar bodi bus, eksklusif spion)
-                                  # Bus kota Indonesia (Hino RK/RM, Mercedes OH):
-                                  #   lebar total termasuk spion ≈ 2.50 m
-                                  #   lebar bodi bodi-ke-bodi       ≈ 2.20 m
-                                  # Memakai lebar bodi mengurangi false priority-flag
-                                  # pada kendaraan di jalur sebelah / yang menyalip.
-                                  # Turunkan lebih jauh (mis. 2.0) jika masih terlalu
-                                  # sensitif; naikkan jika ada kendaraan di depan
-                                  # yang terlewat.
 
 # ===========================================================================
 # DIMENSI KENDARAAN (meter) — konteks Indonesia
@@ -127,7 +114,7 @@ GPS_STALE_TIMEOUT_S  = 3.0    # detik — GPS consumer grade update 1 Hz;
 # Sensor fusion: jika selisih V_gps vs V_closing_ipm melebihi threshold ini,
 # GPS dianggap outlier dan tidak dipakai sebagai floor.
 # 5 m/s = 18 km/h — toleransi cukup longgar untuk GPS consumer grade
-GPS_FUSION_MAX_DIFF_MS = 5.0  # m/s
+GPS_FUSION_MAX_DIFF_MS = 4.0  # m/s
 
 # ===========================================================================
 # TTC
