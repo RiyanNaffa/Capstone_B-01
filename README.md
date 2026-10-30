@@ -235,3 +235,66 @@ scp orangepi@<IP>:/tmp/adas_log.txt ./adas_log_$(date +%Y%m%d).txt
 | LCD TFT | SPI1 (`spidev1.0`) | LED | 18 | 3.3V |
 | Buzzer | GPIO | Base | 12 | GPIO257 / PI1 |
 | Kamera HD USB | USB (v4l2) | — | — | — |
+
+## 10. Evaluasi Model dari Rekaman
+
+Perintah berikut dijalankan dari `/opt/adas` pada Orange Pi.
+
+### Ambil sampel satu frame per detik
+
+```bash
+sudo /opt/adas/.venv/bin/python3 -m adas.sample_video_frames
+```
+
+Video `*_raw.avi` di `/opt/adas/recordings` akan disampel ke:
+`/opt/adas/recordings/frame_samples/<nama-video-tanpa-_raw.avi>/`.
+Jika folder sampel sudah berisi file, pindahkan folder tersebut terlebih dahulu
+agar sampel lama atau label tidak tercampur.
+
+### Siapkan label dan evaluasi
+
+Evaluasi harus memakai ground truth, bukan confidence model. Untuk setiap gambar,
+siapkan file `.txt` format YOLO dengan satu baris per objek:
+`class_id x_center y_center width height` (koordinat ternormalisasi 0–1).
+Petakan class ID label ke kelas model: `bus,mobil,motor,truk`; sesuaikan urutan
+`--class-names` dengan ID pada `data.yaml` Roboflow. Contohnya, jika ID 1 pada
+Roboflow berarti `car`, isikan kelas model yang bersesuaian (`mobil`) pada
+posisi kedua. Label kosong berarti gambar tersebut sudah diperiksa dan tidak
+memiliki objek.
+
+Label dapat diletakkan di samping gambar sampel atau pada folder terpisah:
+
+```bash
+sudo /opt/adas/.venv/bin/python3 -m adas.evaluate_model \
+  --samples /opt/adas/recordings/frame_samples/20261029_115929 \
+  --labels-dir /opt/adas/roboflow/labels/test
+```
+
+Laporan `metrics_<nama-folder-sampel>.jpg`, `.json`, `.csv`, dan `.txt`
+disimpan di `/opt/adas/models`, sehingga hasil tiap video tidak saling
+menimpa. Metrik utama adalah precision, recall, dan F1 pada IoU 0.5 dengan
+confidence default sistem. Target precision lebih dari 80% ditandai di laporan;
+confidence rata-rata saja bukan ukuran akurasi.
+
+### Replay video dan endurance
+
+Tanpa durasi, video diputar satu kali. Dengan durasi, video atau playlist
+diulang sampai durasi tercapai. Saat endurance, perekaman output nonaktif secara
+default untuk menghindari pemenuhan disk.
+
+```bash
+# Ulang satu video selama 4 jam
+sudo /opt/adas/.venv/bin/python3 -m adas.main_video \
+  --video /opt/adas/recordings/20261029_115929_raw.avi --duration-hours 4
+
+# Putar semua *_raw.avi berurutan dan ulang playlist selama 4 jam
+sudo /opt/adas/.venv/bin/python3 -m adas.main_video \
+  --all --duration-hours 4
+
+# Satu kali playback dengan bbox, kelas, dan confidence
+sudo /opt/adas/.venv/bin/python3 -m adas.main_video \
+  --video /opt/adas/recordings/20261029_115929_raw.avi --annotate
+```
+
+Output video annotated berada di `/opt/adas/recordings/pipeline_video`.
+Mode video tidak menggunakan GPS, LCD, atau buzzer.

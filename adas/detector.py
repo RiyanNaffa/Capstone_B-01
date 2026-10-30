@@ -47,7 +47,13 @@ class YOLODetector:
     Atau gunakan shortcut detect(bgr_frame) → List[dict] sekaligus.
     """
 
-    def __init__(self, model_path: str = MODEL_PATH) -> None:
+    def __init__(
+        self,
+        model_path: str = MODEL_PATH,
+        confidence_threshold: float = CONF_THRESHOLD,
+    ) -> None:
+        if not 0.0 <= confidence_threshold <= 1.0:
+            raise ValueError("confidence_threshold harus berada antara 0 dan 1")
         if not os.path.exists(model_path):
             raise FileNotFoundError(
                 f"[detector] Model tidak ditemukan: {model_path}\n"
@@ -69,6 +75,7 @@ class YOLODetector:
         self._in_quant  = inp_det["quantization"]   # (scale, zero_point)
         self._out_quant = out_det["quantization"]
         self._out_dtype = out_det["dtype"]
+        self._confidence_threshold = confidence_threshold
 
     # ------------------------------------------------------------------
     # Publik
@@ -133,7 +140,7 @@ class YOLODetector:
         confidences = data[:, 4]
         class_ids   = data[:, 5].astype(int)
 
-        mask        = confidences >= CONF_THRESHOLD
+        mask        = confidences >= self._confidence_threshold
         boxes_norm  = boxes_norm[mask]
         confidences = confidences[mask]
         class_ids   = class_ids[mask]
