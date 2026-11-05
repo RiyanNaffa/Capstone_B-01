@@ -31,7 +31,7 @@ import os
 from datetime import datetime
 import threading
 import time
-from typing import List, Optional
+from typing import List, Optional, Protocol, Tuple
 
 import cv2
 import numpy as np
@@ -62,6 +62,14 @@ from .buzzer      import BuzzerController
 from .lcd         import ACASDisplay
 
 log = logging.getLogger(__name__)
+
+
+class CaptureSource(Protocol):
+    def grab(self) -> bool: ...
+
+    def retrieve(self) -> Tuple[bool, Optional[np.ndarray]]: ...
+
+    def release(self) -> None: ...
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -354,12 +362,16 @@ class ADASPipeline:
         self._data_logger = TTCDataLogger(RECORD_DIR)
 
         # Kamera
-        self._cap: cv2.VideoCapture  # assigned setelah kamera berhasil dibuka
+        self._cap: CaptureSource  # assigned setelah kamera berhasil dibuka
 
     # ------------------------------------------------------------------
     # Entry point
     # ------------------------------------------------------------------
-    def run(self) -> None:
+    def run(
+        self,
+        input_capture: Optional[CaptureSource] = None,
+        input_name: str = "KAMERA",
+    ) -> None:
         """Jalankan pipeline. Blocking sampai stop() dipanggil atau error."""
         log.info("[pipeline] Memulai sistem AMCAS...")
 
@@ -369,7 +381,7 @@ class ADASPipeline:
         # Daftar komponen boot — pakai huruf kapital semua agar aman di font 5x7
         boot = [
             ("MODEL YOLO",  "wait"),
-            ("KAMERA",      "wait"),
+            (input_name,    "wait"),
             ("GPS",         "wait"),
             ("BUZZER",      "wait"),
             ("SISTEM",      "wait"),
@@ -392,25 +404,28 @@ class ADASPipeline:
             return
         self._lcd.show_boot_screen(boot)
 
-        # --- Buka kamera ---
-        cam_path = find_camera_device()
-        cap = cv2.VideoCapture(cam_path, cv2.CAP_V4L2)
-        if not cap.isOpened():
-            log.critical("[pipeline] Gagal membuka kamera: %s", cam_path)
-            cap.release()
-            boot[1] = ("KAMERA", "fail")
-            self._lcd.show_boot_screen(boot)
-            return
-        self._cap = cap
-
-        self._cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH,  INPUT_W)
-        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, INPUT_H)
-        self._cap.set(cv2.CAP_PROP_BUFFERSIZE, FRAME_BUFFER_SIZE)
-        log.info("[pipeline] Kamera dibuka: %dx%d",
-                 int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                 int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-        boot[1] = ("KAMERA", "ok")
+        # --- Kamera live atau capture eksternal (mis. receiver UDP) ---
+        if input_capture is None:
+            cam_path = find_camera_device()
+            cap = cv2.VideoCapture(cam_path, cv2.CAP_V4L2)
+            if not cap.isOpened():
+                log.critical("[pipeline] Gagal membuka kamera: %s", cam_path)
+                cap.release()
+                boot[1] = (input_name, "fail")
+                self._lcd.show_boot_screen(boot)
+                return
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  INPUT_W)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, INPUT_H)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, FRAME_BUFFER_SIZE)
+            self._cap = cap
+            log.info("[pipeline] Kamera dibuka: %dx%d",
+                     int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                     int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+        else:
+            self._cap = input_capture
+            log.info("[pipeline] Input eksternal siap: %s", input_name)
+        boot[1] = (input_name, "ok")
         self._lcd.show_boot_screen(boot)
 
         # --- Mulai GPS ---

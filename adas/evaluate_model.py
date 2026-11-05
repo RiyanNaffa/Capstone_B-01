@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import importlib
 import json
 import logging
 import math
@@ -12,6 +13,7 @@ import os
 import re
 import sys
 from collections import defaultdict
+from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import cv2
@@ -22,12 +24,107 @@ from adas.constants import (
     CONF_THRESHOLD,
     INPUT_H,
     INPUT_W,
-    MODEL_PATH,
+    NUM_THREADS,
 )
-from adas.detector import YOLODetector
 
 Box = Tuple[float, float, float, float]
 log = logging.getLogger("evaluate_model")
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DATASET_DIR = PROJECT_ROOT / "dataset" / "test1.v1-full-testing.yolo26"
+DEFAULT_SAMPLES_DIR = DEFAULT_DATASET_DIR / "test" / "images"
+DEFAULT_MODEL_PATH =  PROJECT_ROOT / "dataset" / "models" / "ugm-augment" / "best_int8.tflite"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "dataset" / "models" / "ugm-augment"
+
+
+class TFLiteYoloDetector:
+    """Evaluator-local YOLO TFLite runner, independent of adas.detector."""
+
+    def __init__(self, model_path: str, confidence_threshold: float) -> None:
+        interpreter_class = self._load_interpreter()
+        self._interpreter = interpreter_class(
+            model_path=model_path,
+            num_threads=NUM_THREADS,
+        )
+        self._interpreter.allocate_tensors()
+
+        input_detail = self._interpreter.get_input_details()[0]
+        output_detail = self._interpreter.get_output_details()[0]
+        self._input_index = input_detail["index"]
+        self._output_index = output_detail["index"]
+        self._input_dtype = input_detail["dtype"]
+        self._input_quantization = input_detail["quantization"]
+        self._output_quantization = output_detail["quantization"]
+        self._output_dtype = output_detail["dtype"]
+        self._confidence_threshold = confidence_threshold
+
+    @staticmethod
+    def _load_interpreter():
+        candidates = (
+            ("ai_edge_litert.interpreter", "Interpreter"),
+            ("tflite_runtime.interpreter", "Interpreter"),
+        )
+        errors = []
+        for module_name, attribute in candidates:
+            try:
+                module = importlib.import_module(module_name)
+                return getattr(module, attribute)
+            except (ImportError, OSError, RuntimeError) as exc:
+                errors.append(f"{module_name}: {exc}")
+        details = "; ".join(errors)
+        raise RuntimeError(
+            "Tidak ada runtime TFLite yang dapat dimuat. "
+            "Di WSL Ubuntu 26/Python 3.14, aktifkan virtualenv dan install "
+            "LiteRT dengan `python -m pip install ai-edge-litert`. "
+            "Untuk versi Python yang didukung, `tflite-runtime` juga dapat digunakan. "
+            f"Detail: {details}"
+        )
+
+    def detect(self, bgr_frame: np.ndarray) -> List[dict]:
+        rgb = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
+        resized = cv2.resize(
+            rgb, (INPUT_W, INPUT_H), interpolation=cv2.INTER_LINEAR
+        )
+        tensor = resized.astype(np.float32) / 255.0
+        if self._input_dtype in (np.int8, np.uint8):
+            scale, zero_point = self._input_quantization
+            scale = scale if scale != 0.0 else (1.0 / 255.0)
+            low, high = (-128, 127) if self._input_dtype == np.int8 else (0, 255)
+            tensor = np.clip(
+                np.round(tensor / scale + zero_point), low, high
+            ).astype(self._input_dtype)
+
+        self._interpreter.set_tensor(self._input_index, tensor[np.newaxis, ...])
+        self._interpreter.invoke()
+        output = self._interpreter.get_tensor(self._output_index)
+        if self._output_dtype in (np.int8, np.uint8):
+            scale, zero_point = self._output_quantization
+            scale = scale if scale != 0.0 else (1.0 / 255.0)
+            output = (output.astype(np.float32) - zero_point) * scale
+
+        data = output[0]
+        boxes = data[:, :4]
+        confidences = data[:, 4]
+        class_ids = data[:, 5].astype(int)
+        mask = confidences >= self._confidence_threshold
+
+        detections = []
+        for box, confidence, class_id in zip(
+            boxes[mask], confidences[mask], class_ids[mask]
+        ):
+            if class_id < 0 or class_id >= len(CLASS_NAMES):
+                continue
+            detections.append({
+                "bbox": (
+                    int(np.clip(box[0] * INPUT_W, 0, INPUT_W - 1)),
+                    int(np.clip(box[1] * INPUT_H, 0, INPUT_H - 1)),
+                    int(np.clip(box[2] * INPUT_W, 0, INPUT_W - 1)),
+                    int(np.clip(box[3] * INPUT_H, 0, INPUT_H - 1)),
+                ),
+                "class_name": CLASS_NAMES[class_id],
+                "confidence": float(confidence),
+            })
+        return detections
 
 
 def _read_yolo_labels(path: str, class_count: int) -> List[Tuple[int, Box]]:
@@ -210,8 +307,9 @@ def evaluate(
             f"{', '.join(CLASS_NAMES)}; urutannya boleh disesuaikan."
         )
 
-    detector = YOLODetector(
-        model_path=model_path, confidence_threshold=confidence
+    detector = TFLiteYoloDetector(
+        model_path=model_path,
+        confidence_threshold=confidence,
     )
     totals = defaultdict(lambda: [0, 0, 0])
     confidence_sum = defaultdict(float)
@@ -288,7 +386,12 @@ def evaluate(
     }
 
     os.makedirs(output_dir, exist_ok=True)
-    sample_name = os.path.basename(os.path.normpath(samples_dir)) or "samples"
+    sample_path = Path(samples_dir)
+    sample_name = (
+        sample_path.parent.name
+        if sample_path.name.lower() == "images"
+        else sample_path.name
+    ) or "samples"
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", sample_name)
     report_stem = f"metrics_{safe_name}"
     json_path = os.path.join(output_dir, f"{report_stem}.json")
@@ -358,18 +461,22 @@ def main() -> None:
     )
     parser.add_argument(
         "--samples",
-        required=True,
-        help="Folder sampel satu video, mis. /opt/adas/recordings/frame_samples/<video>",
+        default=str(DEFAULT_SAMPLES_DIR),
+        help=f"Folder gambar (default: {DEFAULT_SAMPLES_DIR})",
     )
     parser.add_argument(
         "--labels-dir",
         help="Folder label .txt YOLO jika tidak berada di samping gambar",
     )
-    parser.add_argument("--model", default=MODEL_PATH, help="Path model TFLite")
+    parser.add_argument(
+        "--model",
+        default=str(DEFAULT_MODEL_PATH),
+        help=f"Path model TFLite (default: {DEFAULT_MODEL_PATH})",
+    )
     parser.add_argument(
         "--output-dir",
-        default=os.path.dirname(MODEL_PATH),
-        help="Folder laporan (default: direktori model)",
+        default=str(DEFAULT_OUTPUT_DIR),
+        help=f"Folder laporan (default: {DEFAULT_OUTPUT_DIR})",
     )
     parser.add_argument(
         "--confidence",
@@ -390,6 +497,12 @@ def main() -> None:
     class_names = [name.strip() for name in args.class_names.split(",") if name.strip()]
     if not class_names or len(set(class_names)) != len(class_names):
         parser.error("--class-names harus berisi nama kelas unik")
+    if not os.path.isdir(args.samples):
+        parser.error(f"Folder gambar tidak ditemukan: {args.samples}")
+    if not os.path.isfile(args.model):
+        parser.error(f"Model tidak ditemukan: {args.model}")
+    if args.labels_dir and not os.path.isdir(args.labels_dir):
+        parser.error(f"Folder label tidak ditemukan: {args.labels_dir}")
 
     try:
         report = evaluate(
@@ -412,7 +525,8 @@ def main() -> None:
             report["overall"]["f1"],
         )
     )
-    print(f"Laporan tersimpan di: {os.path.abspath(args.output_dir)}")
+    print(f"Laporan JSON: {report['output_files']['json']}")
+    print(f"Grafik JPG: {report['output_files']['chart']}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,23 @@
+[Unit]
+Description=ADAS AMCAS — Laptop UDP Video Receiver
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/adas
+ExecStart=/opt/adas/.venv/bin/python3 -m adas.main_laptop \
+    --bind 0.0.0.0 \
+    --port 5000 \
+    --control-port 5001
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+StandardOutput=journal
+StandardError=journal
+User=root
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target
