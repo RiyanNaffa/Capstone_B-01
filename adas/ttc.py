@@ -116,19 +116,13 @@ def classify_status(ttc: float, confidence: str) -> str:
 # ---------------------------------------------------------------------------
 def pick_critical(tracks: List[Track]) -> Optional[Track]:
     """
-    Pilih satu track yang paling mengancam:
-      1. is_priority=True lebih diutamakan daripada tidak.
-      2. Di antara priority, pilih yang TTC terkecil.
-      3. Jika tidak ada priority track, pilih yang TTC terkecil dari semua.
+    Pilih track prioritas dengan TTC terkecil; track di luar lebar bus diabaikan.
     """
-    active = [t for t in tracks if t.is_active and t.distance_m > 0]
-    if not active:
-        return None
-
-    priority = [t for t in active if t.is_priority]
-    candidates = priority if priority else active
-
-    return min(candidates, key=lambda t: t.ttc)
+    candidates = [
+        t for t in tracks
+        if t.is_active and t.distance_m > 0 and t.is_priority
+    ]
+    return min(candidates, key=lambda t: t.ttc) if candidates else None
 
 
 # ---------------------------------------------------------------------------
